@@ -1,0 +1,122 @@
+
+//+------------------------------------------------------------------+
+//|                                       SmartHedging.mq5            |
+//|                      Copyright 2022, Forex Robot Easy Team         |
+//|                                           forexroboteasy.com       |
+//+------------------------------------------------------------------+
+
+// Define input parameters
+input double RiskPercentage = 2.0;       // Percentage of account balance to risk per trade
+input double BreakevenPercentage = 1.5;  // Percentage of profit required to move stop loss to breakeven
+input double ProfitPercentage = 3.0;     // Percentage of profit required to close the hedging cycle
+
+// Define global variables
+double AccountBalance;
+double LotSize;
+double StopLoss;
+double TakeProfit;
+bool HedgingCycleInProgress;
+
+//+------------------------------------------------------------------+
+//| Expert Advisor initialization function                            |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   AccountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   LotSize = 0.01;  // Initial lot size
+   
+   return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+//| Expert Advisor start function                                      |
+//+------------------------------------------------------------------+
+void OnStart()
+{
+   // Perform manual analysis of technical indicators here
+   // Determine optimal lot size based on risk percentage and account balance
+   LotSize = (AccountBalance * RiskPercentage) / 100 / MarketInfo(Symbol(), MODE_TICKVALUE);
+   
+   // Open a trade with the calculated lot size
+   if (OrderSend(Symbol(), OP_BUY, LotSize, Ask, 0, 0, 0, 'SmartHedging', 0, 0, Green) > 0)
+   {
+      Print('Trade opened successfully');
+      StopLoss = Ask - (ATR(Symbol(), Period(), 14) * 2);  // Set initial stop loss
+      TakeProfit = Ask + (ATR(Symbol(), Period(), 14) * 4);  // Set initial take profit
+      HedgingCycleInProgress = false;
+   }
+   else
+   {
+      Print('Failed to open trade');
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Expert Advisor tick function                                       |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   // Check if hedging cycle is in progress
+   if (HedgingCycleInProgress)
+   {
+      // Check if current position is profitable enough to close the hedging cycle
+      if (OrderProfit(OrderTicket()) >= (OrderLots() * Point * ProfitPercentage / 100))
+      {
+         // Close all open orders
+         for (int i = OrdersTotal() - 1; i >= 0; i--)
+         {
+            if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+            {
+               if (OrderSymbol() == Symbol())
+               {
+                  OrderClose(OrderTicket(), OrderLots(), Bid, 0, Red);
+               }
+            }
+         }
+         
+         Print('Hedging cycle closed successfully');
+         HedgingCycleInProgress = false;
+      }
+   }
+   else
+   {
+      // Check if current position is at a loss
+      if (OrderProfit(OrderTicket()) < 0)
+      {
+         // Calculate new stop loss and take profit levels for the hedging cycle
+         StopLoss = Bid - (ATR(Symbol(), Period(), 14) * 2);
+         TakeProfit = Bid + (ATR(Symbol(), Period(), 14) * 4);
+         
+         // Open a hedging order with the same lot size as the initial trade
+         if (OrderSend(Symbol(), OP_SELL, LotSize, Bid, 0, StopLoss, TakeProfit, 'SmartHedging', 0, 0, Red) > 0)
+         {
+            Print('Hedging order opened successfully');
+            HedgingCycleInProgress = true;
+         }
+         else
+         {
+            Print('Failed to open hedging order');
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Expert Advisor deinitialization function                          |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   // Close all open orders before deinitialization
+   for (int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+      {
+         if (OrderSymbol() == Symbol())
+         {
+            OrderClose(OrderTicket(), OrderLots(), Bid, 0, Red);
+         }
+      }
+   }
+   
+   Print('Expert advisor deinitialized');
+}
